@@ -17,6 +17,7 @@
 # along with acarshub.  If not, see <http://www.gnu.org/licenses/>.
 
 import eventlet
+import copy
 
 eventlet.monkey_patch()
 import acarshub_helpers  # noqa: E402
@@ -385,8 +386,13 @@ def message_listener(message_type=None, ip="127.0.0.1", port=None):
                         if not acarshub_configuration.QUIET_MESSAGES:
                             print(f"MESSAGE:{message_type.lower()}Generator: {j}")
 
+                        message_with_type = copy.deepcopy(acars_formatter.format_acars_message(j))
+                        message_with_type["message_type"] = message_type
+                        message_for_socket = acarshub_helpers.update_keys(message_with_type)
+
+                        #acarshub_logging.log(f"recent message append", "socket.io", 1)
                         list_of_recent_messages.append(
-                            (que_type, acars_formatter.format_acars_message(j))
+                            (que_type, message_for_socket)
                         )  # add to recent message que for anyone fresh loading the page
 
 
@@ -505,8 +511,9 @@ def init():
         for item in results:
             json_message = item
             try:
+                message_for_socket = acarshub_helpers.update_keys(copy.deepcopy(json_message))
                 list_of_recent_messages.insert(
-                    0, [json_message["message_type"], json_message]
+                    0, (message_for_socket["message_type"], message_for_socket)
                 )
             except Exception as e:
                 acarshub_logging.log(
@@ -588,7 +595,6 @@ def not_found(e):
 @socketio.on("connect", namespace="/main")
 def main_connect():
     import sys
-    import copy
 
     # need visibility of the global thread object
     global thread_html_generator
@@ -598,6 +604,7 @@ def main_connect():
     recent_options = {"loading": True, "done_loading": False}
 
     requester = request.sid
+    #acarshub_logging.log(f"request.sid: {request.sid}", "socket.io", 1)
 
     try:
         socketio.emit(
@@ -633,6 +640,7 @@ def main_connect():
             f"Main Connect: Error sending features_enabled: {e}", "webapp"
         )
         acarshub_logging.acars_traceback(e, "webapp")
+
     try:
         socketio.emit(
             "labels",
@@ -645,17 +653,15 @@ def main_connect():
         acarshub_logging.acars_traceback(e, "webapp")
 
     msg_index = 1
-    for msg_type, json_message_orig in list_of_recent_messages:
+    for msg_type, json_message in list_of_recent_messages:
         if msg_index == len(list_of_recent_messages):
             recent_options["done_loading"] = True
         msg_index += 1
-        json_message = copy.deepcopy(json_message_orig)
-        json_message["message_type"] = msg_type
         try:
             socketio.emit(
                 "acars_msg",
                 {
-                    "msghtml": acarshub_helpers.update_keys(json_message),
+                    "msghtml": json_message,
                     **recent_options,
                 },
                 to=requester,
@@ -666,6 +672,7 @@ def main_connect():
                 f"Main Connect: Error sending acars_msg: {e}", "webapp"
             )
             acarshub_logging.acars_traceback(e, "webapp")
+
 
     try:
         socketio.emit(
@@ -714,6 +721,8 @@ def main_connect():
         sys.stdout.flush()
         thread_html_generator_event.clear()
         thread_html_generator = socketio.start_background_task(htmlListener)
+
+    #acarshub_logging.log(f"request.sid done: {request.sid}", "socket.io", 1)
 
 
 @socketio.on("query_terms", namespace="/main")
